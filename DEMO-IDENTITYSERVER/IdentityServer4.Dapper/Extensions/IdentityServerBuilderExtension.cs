@@ -1,4 +1,4 @@
-﻿using IdentityServer4.Dapper.HostedServices;
+﻿using IdentityServer4.Dapper.Services;
 using IdentityServer4.Dapper.Stores;
 using IdentityServer4.Stores;
 using Microsoft.Extensions.DependencyInjection;
@@ -16,11 +16,18 @@ namespace IdentityServer4.Dapper.Extensions
             builder.Services.AddSingleton(opts);
             options?.Invoke(opts);
 
-            builder.Services.AddTransient<IClientStore, ClientStore>();
-            builder.Services.AddTransient<IResourceStore, ResourceStore>();
-            builder.Services.AddTransient<IPersistedGrantStore, PersistedGrantStore>();
+            builder.AddClientStore<ClientStore>();
+            builder.AddResourceStore<ResourceStore>();
+            builder.AddCorsPolicyService<CorsPolicyService>();
 
-            builder.Services.AddTransient<IPersistedGrantExpiredCleanup, PersistedGrantExpiredCleanup>();
+            builder.AddInMemoryCaching();
+            builder.AddClientStoreCache<ClientStore>();
+            builder.AddResourceStoreCache<ResourceStore>();
+            builder.AddCorsPolicyCache<CorsPolicyService>();
+
+            builder.Services.AddTransient<IPersistedGrantStore, PersistedGrantStore>();
+            builder.Services.AddTransient<IDeviceFlowStore, DeviceFlowStore>();
+
             builder.Services.AddSingleton<TokenCleanup>();
             builder.Services.AddSingleton<IHostedService, TokenCleanupHostedService>();
 

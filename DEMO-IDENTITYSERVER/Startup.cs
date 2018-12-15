@@ -1,19 +1,19 @@
-﻿using IdentityServer4.Dapper.Extensions;
-using IdentityServer4.Dapper.Migrations;
+﻿using IdentityServer4.Dapper;
+using IdentityServer4.Dapper.Extensions;
 using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
 
-namespace DEMO_IDENTITYSERVER
+namespace DEMOIDENTITYSERVER
 {
     public class Startup
     {
         public void ConfigureServices(IServiceCollection services)
         {
-            var connectionString = @"Data Source=(localdb)\ProjectsV13;Initial Catalog=identityserver;Integrated Security=True;Connect Timeout=30;Encrypt=False;TrustServerCertificate=False;ApplicationIntent=ReadWrite;MultiSubnetFailover=False"; ;
+            var connectionString = @"Data Source=(localdb)\ProjectsV13;Initial Catalog=identityserver4;Integrated Security=True;Connect Timeout=30;Encrypt=False;TrustServerCertificate=False;ApplicationIntent=ReadWrite;MultiSubnetFailover=False"; ;
 
-            services.AddDbContext<DatabaseContext>(options =>
+            services.AddDbContext<DapperStoreContext>(options =>
             {
                 options.UseSqlServer(connectionString);
             });
@@ -23,7 +23,7 @@ namespace DEMO_IDENTITYSERVER
                     .AddDapperStore(options =>
                     {
                         options.DbConnectionString = connectionString;
-                        options.TokenCleanupEnabled = false;
+                        options.TokenCleanupEnabled = true;
                         options.TokenCleanupInterval = 3600;
                     });
         }

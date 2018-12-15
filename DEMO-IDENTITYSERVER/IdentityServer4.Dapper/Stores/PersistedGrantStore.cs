@@ -1,9 +1,6 @@
 ﻿using Dapper;
 using IdentityServer4.Dapper.Mappers;
-using IdentityServer4.Models;
 using IdentityServer4.Stores;
-using Microsoft.Extensions.Logging;
-using System;
 using System.Collections.Generic;
 using System.Data.SqlClient;
 using System.Linq;
@@ -13,52 +10,52 @@ namespace IdentityServer4.Dapper.Stores
 {
     public class PersistedGrantStore : IPersistedGrantStore
     {
-        private readonly ILogger<PersistedGrantStore> _logger;
         private readonly DapperStoreOptions _dapperStoreOptions;
 
-        public PersistedGrantStore(ILogger<PersistedGrantStore> logger, DapperStoreOptions dapperStoreOptions)
+        public PersistedGrantStore(DapperStoreOptions dapperStoreOptions)
         {
-            _logger = logger;
             _dapperStoreOptions = dapperStoreOptions;
         }
 
-        public async Task<IEnumerable<PersistedGrant>> GetAllAsync(string subjectId)
+        public async Task<IEnumerable<Models.PersistedGrant>> GetAllAsync(string subjectId)
         {
             using (var connection = new SqlConnection(_dapperStoreOptions.DbConnectionString))
             {
-                string sqlStr = $@"
+                string sql = $@"
                 SELECT 
-	                * 
+	                K,
+	                Type,
+	                SubjectId,
+	                ClientId,
+	                CreationTime,
+	                Expiration,
+	                Data 
                 FROM PersistedGrant 
-                WHERE SubjectId = @subjectId
+                WHERE SubjectId = @subjectId;
                 ";
-
-                var persistedGrants = (await connection.QueryAsync<Entities.PersistedGrant>(sqlStr, new { subjectId }))?.AsList();
-
-                _logger.LogDebug("{persistedGrantCount} persisted grants found for {subjectId}", persistedGrants.Count, subjectId);
-
-                return persistedGrants.Select(x => x.ToModel());
+                var persistedGrants = (await connection.QueryAsync<Entities.PersistedGrant>(sql, new { subjectId }))?.AsList();
+                return persistedGrants.Select(v => v.ToModel());
             }
         }
 
-        public async Task<PersistedGrant> GetAsync(string key)
+        public async Task<Models.PersistedGrant> GetAsync(string key)
         {
             using (var connection = new SqlConnection(_dapperStoreOptions.DbConnectionString))
             {
-                var sqlStr = $@"
-                SELECT
-	                * 
+                var sql = $@"
+                SELECT 
+	                K,
+	                Type,
+	                SubjectId,
+	                ClientId,
+	                CreationTime,
+	                Expiration,
+	                Data 
                 FROM PersistedGrant 
-                WHERE [Key] = @key
+                WHERE K = @key;
                 ";
-
-                var persistedGrant = await connection.QueryFirstOrDefaultAsync<Entities.PersistedGrant>(sqlStr, new { key });
-
-                var result = persistedGrant.ToModel();
-
-                _logger.LogDebug("{persistedGrantKey} found in database: {persistedGrantKeyFound}", key, result != null);
-
-                return result;
+                var persistedGrant = await connection.QueryFirstOrDefaultAsync<Entities.PersistedGrant>(sql, new { key });
+                return persistedGrant?.ToModel();
             }
         }
 
@@ -66,15 +63,12 @@ namespace IdentityServer4.Dapper.Stores
         {
             using (var connection = new SqlConnection(_dapperStoreOptions.DbConnectionString))
             {
-                var sqlStr = $@"
+                var sql = $@"
                 DELETE 
                 FROM PersistedGrant 
-                WHERE ClientId = @clientId AND SubjectId = @subjectId
+                WHERE ClientId = @clientId AND SubjectId = @subjectId;
                 ";
-
-                await connection.ExecuteAsync(sqlStr, new { subjectId, clientId });
-
-                _logger.LogDebug("remove {subjectId} {clientId} from database success", subjectId, clientId);
+                await connection.ExecuteAsync(sql, new { subjectId, clientId });
             }
         }
 
@@ -82,15 +76,12 @@ namespace IdentityServer4.Dapper.Stores
         {
             using (var connection = new SqlConnection(_dapperStoreOptions.DbConnectionString))
             {
-                var sqlStr = $@"
+                var sql = $@"
                 DELETE 
                 FROM PersistedGrant 
-                WHERE ClientId = @clientId AND SubjectId = @subjectId AND Type = @type
+                WHERE ClientId = @clientId AND SubjectId = @subjectId AND Type = @type;
                 ";
-
-                await connection.ExecuteAsync(sqlStr, new { subjectId, clientId, type });
-
-                _logger.LogDebug("remove {subjectId} {clientId} {type} from database success", subjectId, clientId, type);
+                await connection.ExecuteAsync(sql, new { subjectId, clientId, type });
             }
         }
 
@@ -98,61 +89,26 @@ namespace IdentityServer4.Dapper.Stores
         {
             using (var connection = new SqlConnection(_dapperStoreOptions.DbConnectionString))
             {
-                var sqlStr = $@"
+                var sql = $@"
                 DELETE 
                 FROM PersistedGrant
-                WHERE[Key] = @key
+                WHERE K = @key;
                 ";
-
-                await connection.ExecuteAsync(sqlStr, new { key });
-
-                _logger.LogDebug("remove {key} from database success", key);
+                await connection.ExecuteAsync(sql, new { key });
             }
         }
 
-        public async Task StoreAsync(PersistedGrant grant)
+        public async Task StoreAsync(Models.PersistedGrant grant)
         {
             using (var connection = new SqlConnection(_dapperStoreOptions.DbConnectionString))
             {
                 await RemoveAsync(grant.Key);
-
-                var sqlStr = $@"
+                var sql = $@"
                 INSERT 
-                INTO PersistedGrant([Key], Type, SubjectId, ClientId, CreationTime, Expiration, Data) 
-                VALUES(@Key, @Type, @SubjectId, @ClientId, @CreationTime, @Expiration, @Data)
+                INTO PersistedGrant(K, Type, SubjectId, ClientId, CreationTime, Expiration, Data) 
+                VALUES(@Key, @Type, @SubjectId, @ClientId, @CreationTime, @Expiration, @Data);
                 ";
-
-                await connection.ExecuteAsync(sqlStr, grant);
-            }
-        }
-    }
-
-    public interface IPersistedGrantExpiredCleanup
-    {
-        Task Cleanup(DateTime dateTime);
-    }
-
-    public class PersistedGrantExpiredCleanup : IPersistedGrantExpiredCleanup
-    {
-        private readonly ILogger<PersistedGrantExpiredCleanup> _logger;
-        private readonly DapperStoreOptions _dapperStoreOptions;
-
-        public PersistedGrantExpiredCleanup(ILogger<PersistedGrantExpiredCleanup> logger, DapperStoreOptions dapperStoreOptions)
-        {
-            _logger = logger;
-            _dapperStoreOptions = dapperStoreOptions;
-        }
-
-        public async Task Cleanup(DateTime dateTime)
-        {
-            using (var connection = new SqlConnection(_dapperStoreOptions.DbConnectionString))
-            {
-                var sqlStr = $@"
-                DELETE 
-                FROM PersistedGrant 
-                WHERE Expiration > @dateTime";
-
-                await connection.ExecuteAsync(sqlStr, new { dateTime });
+                await connection.ExecuteAsync(sql, new { grant.Key, grant.Type, grant.SubjectId, grant.ClientId, grant.CreationTime, grant.Expiration, grant.Data });
             }
         }
     }

@@ -1,126 +1,112 @@
 ﻿using Dapper;
 using IdentityServer4.Dapper.Mappers;
-using IdentityServer4.Models;
 using IdentityServer4.Stores;
-using Microsoft.Extensions.Logging;
 using System.Collections.Generic;
 using System.Data.SqlClient;
-using System.Linq;
 using System.Threading.Tasks;
 
 namespace IdentityServer4.Dapper.Stores
 {
     public class ResourceStore : IResourceStore
     {
-        private readonly ILogger<ResourceStore> _logger;
         private readonly DapperStoreOptions _dapperStoreOptions;
 
-        public ResourceStore(ILogger<ResourceStore> logger, DapperStoreOptions dapperStoreOptions)
+        public ResourceStore(DapperStoreOptions dapperStoreOptions)
         {
-            _logger = logger;
             _dapperStoreOptions = dapperStoreOptions;
         }
 
-        public async Task<ApiResource> FindApiResourceAsync(string name)
+        public async Task<Models.ApiResource> FindApiResourceAsync(string name)
         {
-            var result = new ApiResource();
-
+            var result = new Models.ApiResource();
             using (var connection = new SqlConnection(_dapperStoreOptions.DbConnectionString))
             {
-                var sqlStr = $@"
-                SELECT
-	                * 
-                FROM ApiResource 
-                WHERE Name = @name AND Enabled = 1;
-
+                var sql = $@"
                 SELECT 
-	                B.* 
-                FROM ApiResource AS A 
-                INNER JOIN ApiResourceScope AS B ON A.Id = B.ApiResourceId 
-                WHERE A.Name = @name AND A.Enabled = 1;
+	                Id,
+                    Enabled,
+                    Name,
+                    DisplayName,
+                    Description
+                FROM ApiResource
+                WHERE Name = @name;
                 ";
+                var resource = (await connection.QueryFirstOrDefaultAsync<Entities.ApiResource>(sql, new { name }));
 
-                var reader = await connection.QueryMultipleAsync(sqlStr, new { name });
+                if (resource == null) return null;
 
-                var entityApiResource = reader.Read<Entities.ApiResource>();
-                var entityApiResourceScope = reader.Read<Entities.ApiResourceScope>();
-                if (entityApiResource != null && entityApiResource.AsList()?.Count > 0)
+                sql = $@"
+                SELECT 
+	                Id,
+                    ApiResourceId,
+                    Type
+                FROM ApiResourceClaim 
+                WHERE ApiResourceId = @id;
+                ";
+                resource.ApiResourceClaims = (await connection.QueryAsync<Entities.ApiResourceClaim>(sql, new { id = resource.Id }))?.AsList();
+
+                sql = $@"
+                SELECT 
+	                Id,
+                    ApiResourceId,
+                    K,
+                    V
+                FROM ApiResourceProperty 
+                WHERE ApiResourceId = @id;
+                ";
+                resource.ApiResourceProperties = (await connection.QueryAsync<Entities.ApiResourceProperty>(sql, new { id = resource.Id }))?.AsList();
+
+                sql = $@"
+                SELECT 
+	                Id,
+                    ApiResourceId,
+                    Name,
+                    DisplayName,
+                    Description,
+                    Required,
+                    Emphasize,
+                    ShowInDiscoveryDocument
+                FROM ApiResourceScope 
+                WHERE ApiResourceId = @id;
+                ";
+                var apiResourceScopes = (await connection.QueryAsync<Entities.ApiResourceScope>(sql, new { id = resource.Id }))?.AsList();
+                if (apiResourceScopes != null && apiResourceScopes.Count > 0)
                 {
-                    var apiResource = entityApiResource.AsList()[0];
-                    apiResource.Scopes = entityApiResourceScope.AsList();
-                    if (apiResource != null)
+                    foreach (var scope in apiResourceScopes)
                     {
-                        _logger.LogDebug("Found {api} API resource in database", name);
-                    }
-                    else
-                    {
-                        _logger.LogDebug("Not found {api} API resource in database", name);
-                    }
-                    result = apiResource.ToModel();
-                }
-            }
-
-            return result;
-        }
-
-        public async Task<IEnumerable<ApiResource>> FindApiResourcesByScopeAsync(IEnumerable<string> scopeNames)
-        {
-            var result = new List<ApiResource>();
-
-            var scopes = "";
-
-            foreach (var scope in scopeNames)
-            {
-                scopes += "'" + scope + "',";
-            }
-
-            if (scopes == "")
-            {
-                return null;
-            }
-            else
-            {
-                scopes = scopes.Substring(0, scopes.Length - 1);
-            }
-
-            var sqlStr = $@"
-            SELECT 
-	            DISTINCT A.* 
-            FROM ApiResource AS A
-            INNER JOIN ApiResourceScope AS B ON A.Id = B.ApiResourceId 
-            WHERE B.Name IN({scopes}) AND A.Enabled = 1;
-            ";
-
-            using (var connection = new SqlConnection(_dapperStoreOptions.DbConnectionString))
-            {
-                var resources = (await connection.QueryAsync<Entities.ApiResource>(sqlStr))?.AsList();
-                if (resources != null && resources.Count > 0)
-                {
-                    foreach (var resource in resources)
-                    {
-                        sqlStr = $@"
+                        sql = $@"
                         SELECT 
-	                        * 
-                        FROM ApiResourceScope 
-                        WHERE ApiResourceId = @id
+	                        Id,
+                            ApiResourceScopeId,
+                            Type
+                        FROM ApiResourceScopeClaim 
+                        WHERE ApiResourceScopeId = @id;
                         ";
-
-                        var apiResourceScopes = (await connection.QueryAsync<Entities.ApiResourceScope>(sqlStr, new { id = resource.Id }))?.AsList();
-                        resource.Scopes = apiResourceScopes;
-                        result.Add(resource.ToModel());
+                        scope.ApiResourceScopeClaims = (await connection.QueryAsync<Entities.ApiResourceScopeClaim>(sql, new { id = resource.Id }))?.AsList();
                     }
-
-                    _logger.LogDebug("Found {scopes} API scopes in database", result.SelectMany(x => x.Scopes).Select(x => x.Name));
                 }
-            }
+                resource.ApiResourceScopes = apiResourceScopes;
 
+                sql = $@"
+                SELECT 
+	                Id,
+                    ApiResourceId,
+                    Description,
+                    Value,
+                    Expiration,
+                    Type
+                FROM ApiResourceSecret 
+                WHERE ApiResourceId = @id;
+                ";
+                resource.ApiResourceSecrets = (await connection.QueryAsync<Entities.ApiResourceSecret>(sql, new { id = resource.Id }))?.AsList();
+
+                result = resource.ToModel();
+            }
             return result;
         }
 
-        public async Task<IEnumerable<IdentityResource>> FindIdentityResourcesByScopeAsync(IEnumerable<string> scopeNames)
+        public async Task<IEnumerable<Models.ApiResource>> FindApiResourcesByScopeAsync(IEnumerable<string> scopeNames)
         {
-            var result = new List<IdentityResource>();
-
             var scopes = "";
 
             foreach (var scope in scopeNames)
@@ -137,80 +123,285 @@ namespace IdentityServer4.Dapper.Stores
                 scopes = scopes.Substring(0, scopes.Length - 1);
             }
 
-            //暂不实现 IdentityClaims
-            var sqlStr = $@"
-            SELECT 
-	            * 
-            FROM IdentityResource 
-            WHERE Name IN({scopes}) AND Enabled = 1 
-            ";
-
+            var result = new List<Models.ApiResource>();
             using (var connection = new SqlConnection(_dapperStoreOptions.DbConnectionString))
             {
-                var resources = (await connection.QueryAsync<Entities.IdentityResource>(sqlStr))?.AsList();
-                if (resources != null && resources.Count > 0)
-                {
-                    foreach (var resource in resources)
-                    {
-                        result.Add(resource.ToModel());
-                    }
-                }
-            }
-
-            return result;
-        }
-
-        public async Task<Resources> GetAllResourcesAsync()
-        {
-            var result = new List<ApiResource>();
-
-            var resources = new List<IdentityResource>();
-
-            using (var connection = new SqlConnection(_dapperStoreOptions.DbConnectionString))
-            {
-                var sqlStr = $@"
-                SELECT 
-	                * 
-                FROM IdentityResource 
-                WHERE Enabled = 1
+                var sql = $@"
+                SELECT DISTINCT 
+	                A.Id,
+                    A.Enabled,
+                    A.Name,
+                    A.DisplayName,
+                    A.Description
+                FROM ApiResource AS A
+                INNER JOIN ApiResourceScope AS B ON A.Id = B.ApiResourceId 
+                WHERE B.Name IN({scopes});
                 ";
-
-                var identityResources = (await connection.QueryAsync<Entities.IdentityResource>(sqlStr))?.AsList();
-                if (identityResources != null && identityResources.Count > 0)
-                {
-                    foreach (var resource in identityResources)
-                    {
-                        resources.Add(resource.ToModel());
-                    }
-                }
-
-                sqlStr = $@"
-                SELECT 
-	                * 
-                FROM ApiResource 
-                WHERE Enabled = 1
-                ";
-
-                var apiResources = (await connection.QueryAsync<Entities.ApiResource>(sqlStr))?.AsList();
+                var apiResources = (await connection.QueryAsync<Entities.ApiResource>(sql))?.AsList();
                 if (apiResources != null && apiResources.Count > 0)
                 {
                     foreach (var resource in apiResources)
                     {
-                        sqlStr = $@"
+                        sql = $@"
                         SELECT 
-	                        * 
-                        FROM ApiResourceScope 
-                        WHERE ApiResourceId = @id
+	                        Id,
+                            ApiResourceId,
+                            Type
+                        FROM ApiResourceClaim 
+                        WHERE ApiResourceId = @id;
                         ";
+                        resource.ApiResourceClaims = (await connection.QueryAsync<Entities.ApiResourceClaim>(sql, new { id = resource.Id }))?.AsList();
 
-                        var apiResourceScopes = (await connection.QueryAsync<Entities.ApiResourceScope>(sqlStr, new { id = resource.Id }))?.AsList();
-                        resource.Scopes = apiResourceScopes;
+                        sql = $@"
+                        SELECT 
+	                        Id,
+                            ApiResourceId,
+                            K,
+                            V
+                        FROM ApiResourceProperty 
+                        WHERE ApiResourceId = @id;
+                        ";
+                        resource.ApiResourceProperties = (await connection.QueryAsync<Entities.ApiResourceProperty>(sql, new { id = resource.Id }))?.AsList();
+
+                        sql = $@"
+                        SELECT 
+	                        Id,
+                            ApiResourceId,
+                            Name,
+                            DisplayName,
+                            Description,
+                            Required,
+                            Emphasize,
+                            ShowInDiscoveryDocument
+                        FROM ApiResourceScope 
+                        WHERE ApiResourceId = @id;
+                        ";
+                        var apiResourceScopes = (await connection.QueryAsync<Entities.ApiResourceScope>(sql, new { id = resource.Id }))?.AsList();
+                        if (apiResourceScopes != null && apiResourceScopes.Count > 0)
+                        {
+                            foreach (var scope in apiResourceScopes)
+                            {
+                                sql = $@"
+                                SELECT 
+	                                Id,
+                                    ApiResourceScopeId,
+                                    Type
+                                FROM ApiResourceScopeClaim 
+                                WHERE ApiResourceScopeId = @id;
+                                ";
+                                scope.ApiResourceScopeClaims = (await connection.QueryAsync<Entities.ApiResourceScopeClaim>(sql, new { id = resource.Id }))?.AsList();
+                            }
+                        }
+                        resource.ApiResourceScopes = apiResourceScopes;
+
+                        sql = $@"
+                        SELECT 
+	                        Id,
+                            ApiResourceId,
+                            Description,
+                            Value,
+                            Expiration,
+                            Type
+                        FROM ApiResourceSecret 
+                        WHERE ApiResourceId = @id;
+                        ";
+                        resource.ApiResourceSecrets = (await connection.QueryAsync<Entities.ApiResourceSecret>(sql, new { id = resource.Id }))?.AsList();
+
                         result.Add(resource.ToModel());
                     }
                 }
             }
+            return result;
+        }
 
-            return new Resources(resources, result);
+        public async Task<IEnumerable<Models.IdentityResource>> FindIdentityResourcesByScopeAsync(IEnumerable<string> scopeNames)
+        {
+            var scopes = "";
+
+            foreach (var scope in scopeNames)
+            {
+                scopes += "'" + scope + "',";
+            }
+
+            if (scopes == "")
+            {
+                return null;
+            }
+            else
+            {
+                scopes = scopes.Substring(0, scopes.Length - 1);
+            }
+
+            var result = new List<Models.IdentityResource>();
+            using (var connection = new SqlConnection(_dapperStoreOptions.DbConnectionString))
+            {
+                var sql = $@"
+                SELECT 
+	                Id,
+	                Enabled,
+                    Name,
+                    DisplayName,
+                    Description,
+                    Required,
+                    Emphasize,
+                    ShowInDiscoveryDocument
+                FROM IdentityResource
+                WHERE Name IN({scopes});
+                ";
+                var identityResources = (await connection.QueryAsync<Entities.IdentityResource>(sql))?.AsList();
+                if (identityResources != null && identityResources.Count > 0)
+                {
+                    foreach (var resource in identityResources)
+                    {
+                        sql = $@"
+                        SELECT 
+	                        Id,
+                            IdentityResourceId,
+                            Type
+                        FROM IdentityResourceClaim 
+                        WHERE IdentityResourceId = @id;
+                        ";
+                        resource.IdentityClaims = (await connection.QueryAsync<Entities.IdentityResourceClaim>(sql, new { id = resource.Id }))?.AsList();
+
+                        sql = $@"
+                        SELECT 
+	                        Id,
+                            IdentityResourceId,
+                            K,
+                            V
+                        FROM IdentityResourceProperty 
+                        WHERE IdentityResourceId = @id;
+                        ";
+                        resource.IdentityResourceProperties = (await connection.QueryAsync<Entities.IdentityResourceProperty>(sql, new { id = resource.Id }))?.AsList();
+
+                        result.Add(resource.ToModel());
+                    }
+                }
+            }
+            return result;
+        }
+
+        public async Task<Models.Resources> GetAllResourcesAsync()
+        {
+            var identities = new List<Models.IdentityResource>();
+            var apis = new List<Models.ApiResource>();
+            using (var connection = new SqlConnection(_dapperStoreOptions.DbConnectionString))
+            {
+                var sql = $@"
+                SELECT 
+	                Id,
+	                Enabled,
+                    Name,
+                    DisplayName,
+                    Description,
+                    Required,
+                    Emphasize,
+                    ShowInDiscoveryDocument
+                FROM IdentityResource;
+                ";
+                var identityResources = (await connection.QueryAsync<Entities.IdentityResource>(sql))?.AsList();
+                if (identityResources != null && identityResources.Count > 0)
+                {
+                    foreach (var resource in identityResources)
+                    {
+                        sql = $@"
+                        SELECT 
+	                        Id,
+                            IdentityResourceId,
+                            Type
+                        FROM IdentityResourceClaim 
+                        WHERE IdentityResourceId = @id;
+                        ";
+                        resource.IdentityClaims = (await connection.QueryAsync<Entities.IdentityResourceClaim>(sql, new { id = resource.Id }))?.AsList();
+
+                        identities.Add(resource.ToModel());
+                    }
+                }
+
+                sql = $@"
+                SELECT 
+	                Id,
+                    Enabled,
+                    Name,
+                    DisplayName,
+                    Description
+                FROM ApiResource;
+                ";
+                var apiResources = (await connection.QueryAsync<Entities.ApiResource>(sql))?.AsList();
+                if (apiResources != null && apiResources.Count > 0)
+                {
+                    foreach (var resource in apiResources)
+                    {
+                        sql = $@"
+                        SELECT 
+	                        Id,
+                            ApiResourceId,
+                            Type
+                        FROM ApiResourceClaim 
+                        WHERE ApiResourceId = @id;
+                        ";
+                        resource.ApiResourceClaims = (await connection.QueryAsync<Entities.ApiResourceClaim>(sql, new { id = resource.Id }))?.AsList();
+
+                        sql = $@"
+                        SELECT 
+	                        Id,
+                            ApiResourceId,
+                            K,
+                            V
+                        FROM ApiResourceProperty 
+                        WHERE ApiResourceId = @id;
+                        ";
+                        resource.ApiResourceProperties = (await connection.QueryAsync<Entities.ApiResourceProperty>(sql, new { id = resource.Id }))?.AsList();
+
+                        sql = $@"
+                        SELECT 
+	                        Id,
+                            ApiResourceId,
+                            Name,
+                            DisplayName,
+                            Description,
+                            Required,
+                            Emphasize,
+                            ShowInDiscoveryDocument
+                        FROM ApiResourceScope 
+                        WHERE ApiResourceId = @id;
+                        ";
+                        var apiResourceScopes = (await connection.QueryAsync<Entities.ApiResourceScope>(sql, new { id = resource.Id }))?.AsList();
+                        if (apiResourceScopes != null && apiResourceScopes.Count > 0)
+                        {
+                            foreach (var scope in apiResourceScopes)
+                            {
+                                sql = $@"
+                                SELECT 
+	                                Id,
+                                    ApiResourceScopeId,
+                                    Type
+                                FROM ApiResourceScopeClaim 
+                                WHERE ApiResourceScopeId = @id;
+                                ";
+                                scope.ApiResourceScopeClaims = (await connection.QueryAsync<Entities.ApiResourceScopeClaim>(sql, new { id = resource.Id }))?.AsList();
+                            }
+                        }
+                        resource.ApiResourceScopes = apiResourceScopes;
+
+                        sql = $@"
+                        SELECT 
+	                        Id,
+                            ApiResourceId,
+                            Description,
+                            Value,
+                            Expiration,
+                            Type
+                        FROM ApiResourceSecret 
+                        WHERE ApiResourceId = @id;
+                        ";
+                        resource.ApiResourceSecrets = (await connection.QueryAsync<Entities.ApiResourceSecret>(sql, new { id = resource.Id }))?.AsList();
+
+                        apis.Add(resource.ToModel());
+                    }
+                }
+            }
+            return new Models.Resources(identities, apis);
         }
     }
 }

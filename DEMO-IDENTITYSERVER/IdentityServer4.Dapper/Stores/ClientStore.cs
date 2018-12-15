@@ -1,8 +1,6 @@
 ﻿using Dapper;
 using IdentityServer4.Dapper.Mappers;
-using IdentityServer4.Models;
 using IdentityServer4.Stores;
-using Microsoft.Extensions.Logging;
 using System.Data.SqlClient;
 using System.Threading.Tasks;
 
@@ -10,76 +8,168 @@ namespace IdentityServer4.Dapper.Stores
 {
     public class ClientStore : IClientStore
     {
-        private readonly ILogger<ClientStore> _logger;
         private readonly DapperStoreOptions _dapperStoreOptions;
 
-        public ClientStore(ILogger<ClientStore> logger, DapperStoreOptions dapperStoreOptions)
+        public ClientStore(DapperStoreOptions dapperStoreOptions)
         {
-            _logger = logger;
             _dapperStoreOptions = dapperStoreOptions;
         }
 
-        public async Task<Client> FindClientByIdAsync(string clientId)
+        public async Task<Models.Client> FindClientByIdAsync(string clientId)
         {
-            var result = new Client();
             var entity = new Entities.Client();
             using (var connection = new SqlConnection(_dapperStoreOptions.DbConnectionString))
             {
-                //由于后续未用到，暂不实现 ClientPostLogoutRedirectUris ClientClaims ClientIdPRestrictions ClientCorsOrigins ClientProperties,有需要的自行添加。
-                var sqlStr = @"
+                var sql = $@"
                 SELECT
-	                *
+	                Id,
+	                Enabled,
+	                ClientId,
+	                ProtocolType,
+	                RequireClientSecret,
+	                ClientName,
+	                Description,
+	                ClientUri,
+	                LogoUri,
+	                RequireConsent,
+	                AllowRememberConsent,
+	                AlwaysIncludeUserClaimsInIdToken,
+	                RequirePkce,
+	                AllowPlainTextPkce,
+	                AllowAccessTokensViaBrowser,
+	                FrontChannelLogoutUri,
+	                FrontChannelLogoutSessionRequired,
+	                BackChannelLogoutUri,
+	                BackChannelLogoutSessionRequired,
+	                AllowOfflineAccess,
+	                IdentityTokenLifetime,
+	                AccessTokenLifetime,
+	                AuthorizationCodeLifetime,
+	                ConsentLifetime,
+	                AbsoluteRefreshTokenLifetime,
+	                SlidingRefreshTokenLifetime,
+	                RefreshTokenUsage,
+	                UpdateAccessTokenClaimsOnRefresh,
+	                RefreshTokenExpiration,
+	                AccessTokenType,
+	                EnableLocalLogin,
+	                IncludeJwtId,
+	                AlwaysSendClientClaims,
+	                ClientClaimsPrefix,
+	                PairWiseSubjectSalt,
+	                UserSsoLifetime,
+	                UserCodeType,
+	                DeviceCodeLifetime
                 FROM Client
-                WHERE ClientId = @clientId AND Enabled = 1;
+                WHERE ClientId = @clientId;
 
-                SELECT 
-	                B.* 
-                FROM Client AS A 
-                INNER JOIN ClientGrantType AS B ON A.Id = B.ClientId 
-                WHERE A.ClientId = @clientId and A.Enabled = 1;
+                SELECT
+	                A.Id,
+                    A.ClientId,
+                    A.Type,
+                    A.Value
+                FROM ClientClaim AS A
+                INNER JOIN Client AS B ON A.ClientId = B.Id
+                WHERE B.ClientId = @clientId;
 
-                SELECT 
-	                B.* 
-                FROM Client AS A 
-                INNER JOIN ClientRedirectUri AS B ON A.Id = B.ClientId 
-                WHERE A.ClientId = @clientId and A.Enabled = 1;
+                SELECT
+	                A.Id,
+                    A.ClientId,
+                    A.Origin
+                FROM ClientCorsOrigin AS A
+                INNER JOIN Client AS B ON A.ClientId = B.Id
+                WHERE B.ClientId = @clientId;
 
-                SELECT 
-	                B.* 
-                FROM Client AS A 
-                INNER JOIN ClientScope AS B ON A.Id = B.ClientId 
-                WHERE A.ClientId = @clientId and A.Enabled = 1;
+                SELECT
+	                A.Id,
+                    A.ClientId,
+                    A.GrantType
+                FROM ClientGrantType AS A
+                INNER JOIN Client AS B ON A.ClientId = B.Id
+                WHERE B.ClientId = @clientId;
 
-                SELECT 
-	                B.* 
-                FROM Client AS A 
-                INNER JOIN ClientSecret AS B ON A.Id = B.ClientId 
-                WHERE A.ClientId = @clientId and A.Enabled = 1;
+                SELECT
+                    A.Id,
+                    A.ClientId,
+                    A.Provider
+                FROM ClientIdPRestriction AS A
+                INNER JOIN Client AS B ON A.ClientId = B.Id
+                WHERE B.ClientId = @clientId;
+
+                SELECT
+                    A.Id,
+                    A.ClientId,
+                    A.PostLogoutRedirectUri 
+				FROM ClientPostLogoutRedirectUri AS A
+                INNER JOIN Client AS B ON A.ClientId = B.Id
+                WHERE B.ClientId = @clientId;
+
+                SELECT
+                    A.Id,
+                    A.ClientId,
+                    A.K,
+                    A.V
+                FROM ClientProperty AS A
+                INNER JOIN Client AS B ON A.ClientId = B.Id
+                WHERE B.ClientId = @clientId;
+
+                SELECT
+                    A.Id,
+                    A.ClientId,
+                    A.RedirectUri
+                FROM ClientRedirectUri AS A
+                INNER JOIN Client AS B ON A.ClientId = B.Id
+                WHERE B.ClientId = @clientId;
+
+                SELECT
+                    A.Id,
+                    A.ClientId,
+                    A.Scope
+                FROM ClientScope AS A
+                INNER JOIN Client AS B ON A.ClientId = B.Id
+                WHERE B.ClientId = @clientId;
+
+                SELECT
+                    A.Id,
+                    A.ClientId,
+                    A.Description,
+                    A.Value,
+                    A.Expiration,
+                    A.Type
+                FROM ClientSecret AS A
+                INNER JOIN Client AS B ON A.ClientId = B.Id
+                WHERE B.ClientId = @clientId;
                 ";
+                var reader = await connection.QueryMultipleAsync(sql, new { clientId });
 
-                var reader = await connection.QueryMultipleAsync(sqlStr, new { clientId });
+                var entityClients = reader.Read<Entities.Client>();
+                var entityClientClaims = reader.Read<Entities.ClientClaim>();
+                var entityClientCorsOrigins = reader.Read<Entities.ClientCorsOrigin>();
+                var entityClientGrantTypes = reader.Read<Entities.ClientGrantType>();
+                var entityClientIdPRestrictions = reader.Read<Entities.ClientIdPRestriction>();
+                var entityClientPostLogoutRedirectUris = reader.Read<Entities.ClientPostLogoutRedirectUri>();
+                var entityClientProperties = reader.Read<Entities.ClientProperty>();
+                var entityClientRedirectUris = reader.Read<Entities.ClientRedirectUri>();
+                var entityClientScopes = reader.Read<Entities.ClientScope>();
+                var entityClientSecrets = reader.Read<Entities.ClientSecret>();
 
-                var entityClient = reader.Read<Entities.Client>();
-                var entityClientGrantType = reader.Read<Entities.ClientGrantType>();
-                var entityClientRedirectUri = reader.Read<Entities.ClientRedirectUri>();
-                var entityClientScope = reader.Read<Entities.ClientScope>();
-                var entityClientSecret = reader.Read<Entities.ClientSecret>();
-
-                if (entityClient != null && entityClient.AsList().Count > 0)
+                if (entityClients != null && entityClients.AsList().Count > 0)
                 {
-                    entity = entityClient.AsList()[0];
-                    entity.AllowedGrantTypes = entityClientGrantType.AsList();
-                    entity.RedirectUris = entityClientRedirectUri.AsList();
-                    entity.AllowedScopes = entityClientScope.AsList();
-                    entity.ClientSecrets = entityClientSecret.AsList();
+                    entity = entityClients.AsList()[0];
+                    entity.ClientClaims = entityClientClaims.AsList();
+                    entity.ClientCorsOrigins = entityClientCorsOrigins.AsList();
+                    entity.ClientGrantTypes = entityClientGrantTypes.AsList();
+                    entity.ClientIdPRestrictions = entityClientIdPRestrictions.AsList();
+                    entity.ClientPostLogoutRedirectUris = entityClientPostLogoutRedirectUris.AsList();
+                    entity.ClientProperties = entityClientProperties.AsList();
+                    entity.ClientRedirectUris = entityClientRedirectUris.AsList();
+                    entity.ClientScopes = entityClientScopes.AsList();
+                    entity.ClientSecrets = entityClientSecrets.AsList();
 
-                    result = entity.ToModel();
+                    return entity.ToModel();
                 }
             }
-
-            _logger.LogDebug("{clientId} found in database: {clientIdFound}", clientId, entity != null);
-
-            return result;
+            return null;
         }
     }
 }
